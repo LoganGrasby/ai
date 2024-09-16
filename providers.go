@@ -109,6 +109,26 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 			}
 			return apiResp.Choices[0].Message.Content, nil
 		}
+	case "Ollama":
+		apiURL = "http://localhost:11434/v1/chat/completions"
+		req = OpenAIRequest{
+			Model:       model,
+			Messages:    []AIMessage{{Role: "user", Content: prompt}},
+			Temperature: 0.7,
+		}
+		headers["Authorization"] = "Bearer " + apiKey
+		headers["Content-Type"] = "application/json"
+		processResponse = func(body []byte) (string, error) {
+			var apiResp OpenAIResponse
+			err := json.Unmarshal(body, &apiResp)
+			if err != nil {
+				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
+			}
+			if len(apiResp.Choices) == 0 {
+				return "", fmt.Errorf("No choices in the API response")
+			}
+			return apiResp.Choices[0].Message.Content, nil
+		}
 	case "Cloudflare":
 		accountID := viper.GetString("cloudflare_account_id")
 		if accountID == "" {
@@ -118,7 +138,6 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 			return "", fmt.Errorf("Cloudflare Account ID not set. Use 'ai config' or set the CLOUDFLARE_ACCOUNT_ID environment variable")
 		}
 		apiURL = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/%s", accountID, model)
-		fmt.Printf("DEBUG: Using prompt: %s\n", prompt)
 		req = CloudflareRequest{
 			Messages:    []AIMessage{{Role: "user", Content: prompt}},
 			MaxTokens:   500,
@@ -127,7 +146,6 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 		headers["Authorization"] = "Bearer " + apiKey
 		headers["Content-Type"] = "application/json"
 		processResponse = func(body []byte) (string, error) {
-			fmt.Printf("DEBUG: Raw API response: %s\n", string(body))
 			var apiResp CloudflareResponse
 			err := json.Unmarshal(body, &apiResp)
 			if err != nil {

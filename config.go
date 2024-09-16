@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -17,6 +20,14 @@ var docStyle = lipgloss.NewStyle().Margin(1, 2)
 
 type item struct {
 	title, desc string
+}
+
+type OllamaModel struct {
+	Name string `json:"name"`
+}
+
+type OllamaResponse struct {
+	Models []OllamaModel `json:"models"`
 }
 
 func (i item) Title() string       { return i.title }
@@ -74,10 +85,10 @@ func initialModel() configModel {
 
 	selectedLLM := viper.GetString("model")
 	if selectedLLM == "" {
-		selectedLLM = "claude-v1"
+		selectedLLM = "claude-3-5-sonnet-20240620"
 	}
 
-	providerChoices := []string{"Cloudflare", "Anthropic", "OpenAI"}
+	providerChoices := []string{"Cloudflare", "Anthropic", "OpenAI", "Ollama"}
 
 	accountID := viper.GetString("cloudflare_account_id")
 
@@ -279,7 +290,7 @@ func (m configModel) View() string {
 		if m.statusMessage != "" {
 			return m.statusMessage + "\n"
 		}
-		return "Thanks for using the config menu!\n"
+		return "Config saved\n"
 	}
 
 	if m.selectedItem == "Configure Provider and API Key" {
@@ -380,6 +391,13 @@ func getLLMsForProvider(provider string) []string {
 		return []string{"gpt-4o", "gpt-4o-mini"}
 	case "Cloudflare":
 		return []string{"@cf/meta/llama-3.1-8b-instruct"}
+	case "Ollama":
+		models, err := getOllamaModels()
+		if err != nil {
+			fmt.Printf("Error fetching Ollama models: %v\n", err)
+			return []string{}
+		}
+		return models
 	default:
 		return []string{}
 	}
@@ -393,6 +411,8 @@ func apiKeyAvailable(provider string) bool {
 		return os.Getenv("OPENAI_API_KEY") != ""
 	case "Cloudflare":
 		return os.Getenv("CLOUDFLARE_API_KEY") != ""
+	case "Ollama":
+		return isOllamaAvailable()
 	default:
 		return false
 	}
@@ -428,8 +448,36 @@ func getAPIKey(provider string) string {
 		if key == "" {
 			key = os.Getenv("CLOUDFLARE_API_KEY")
 		}
+	case "Ollama":
+		key = "ollama_key_placeholder"
 	}
 	return key
+}
+
+func isOllamaAvailable() bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	_, err := client.Get("http://localhost:11434/api/tags")
+	return err == nil
+}
+
+func getOllamaModels() ([]string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var ollamaResp OllamaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, model := range ollamaResp.Models {
+		models = append(models, model.Name)
+	}
+	return models, nil
 }
 
 func maskAPIKey(key string) string {
