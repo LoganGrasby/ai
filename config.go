@@ -153,12 +153,20 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.selectedProvider == "Cloudflare" {
 						m.currentStep = StepEnterAccountID
 						m.textInput.Placeholder = "Enter Cloudflare Account ID"
+						m.textInput.SetValue(m.accountID)
+						m.textInput.CursorEnd()
 						m.textInput.Focus()
 					} else if !apiKeyAvailable(m.selectedProvider) {
 						m.apiKeyRequired = true
 						m.currentStep = StepEnterAPIKey
-						m.textInput.SetValue("")
-						m.textInput.Placeholder = "Enter API Key"
+						existingAPIKey := getAPIKey(m.selectedProvider)
+						if existingAPIKey != "" {
+							maskedAPIKey := maskAPIKey(existingAPIKey)
+							m.textInput.SetValue(maskedAPIKey)
+							m.textInput.CursorEnd()
+						} else {
+							m.textInput.Placeholder = "Enter API Key"
+						}
 						m.textInput.Focus()
 					} else {
 						m.apiKeyRequired = false
@@ -176,7 +184,9 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch msg.Type {
 				case tea.KeyEnter:
 					m.accountID = m.textInput.Value()
-					viper.Set("cloudflare_account_id", m.accountID)
+					if m.accountID != "" {
+						viper.Set("cloudflare_account_id", m.accountID)
+					}
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = "Enter API Key"
 					m.currentStep = StepEnterAPIKey
@@ -192,7 +202,9 @@ func (m configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch msg.Type {
 				case tea.KeyEnter:
 					apiKey := m.textInput.Value()
-					saveAPIKey(m.selectedProvider, apiKey, m.accountID)
+					if apiKey != "" {
+						saveAPIKey(m.selectedProvider, apiKey, m.accountID)
+					}
 					m.apiKeyRequired = false
 					m.currentStep = StepNone
 					m.selectedItem = ""
@@ -421,12 +433,20 @@ func apiKeyAvailable(provider string) bool {
 func saveAPIKey(provider string, apiKey string, accountID string) {
 	switch provider {
 	case "Anthropic":
-		viper.Set("api_keys.anthropic", apiKey)
+		if apiKey != "" {
+			viper.Set("api_keys.anthropic", apiKey)
+		}
 	case "OpenAI":
-		viper.Set("api_keys.openai", apiKey)
+		if apiKey != "" {
+			viper.Set("api_keys.openai", apiKey)
+		}
 	case "Cloudflare":
-		viper.Set("api_keys.cloudflare", apiKey)
-		viper.Set("cloudflare_account_id", accountID)
+		if apiKey != "" {
+			viper.Set("api_keys.cloudflare", apiKey)
+		}
+		if accountID != "" {
+			viper.Set("cloudflare_account_id", accountID)
+		}
 	}
 }
 

@@ -57,7 +57,9 @@ type CloudflareRequest struct {
 }
 
 type CloudflareResponse struct {
-	Response string `json:"response"`
+	Result struct {
+		Response string `json:"response"`
+	} `json:"result"`
 }
 
 func callAPI(provider, model, apiKey, prompt string) (string, error) {
@@ -151,11 +153,11 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
 			}
-			fmt.Printf("DEBUG: Unmarshaled API response: %+v\n", apiResp)
-			if apiResp.Response == "" {
+			var response = apiResp.Result.Response
+			if response == "" {
 				return "", fmt.Errorf("No result in the API response")
 			}
-			return apiResp.Response, nil
+			return response, nil
 		}
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", provider)
