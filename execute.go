@@ -96,6 +96,13 @@ func executeCLICommand(command string) error {
 
 	fmt.Println("Executing command...")
 
+	//Workaround for changing directories
+	if strings.HasPrefix(strings.TrimSpace(command), "cd ") {
+		dir := strings.TrimSpace(strings.TrimPrefix(command, "cd "))
+		fmt.Printf("Your directory cannot be changed. Run: \ncd %s\n", dir)
+		return nil
+	}
+
 	execCmd := exec.Command("sh", "-c", command)
 	var stderr bytes.Buffer
 	execCmd.Stdout = os.Stdout
