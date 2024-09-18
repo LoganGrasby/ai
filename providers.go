@@ -38,6 +38,7 @@ type OpenAIResponse struct {
 }
 
 type AnthropicRequest struct {
+	System      string      `json:"system"`
 	Messages    []AIMessage `json:"messages"`
 	Model       string      `json:"model"`
 	MaxTokens   int         `json:"max_tokens"`
@@ -62,7 +63,7 @@ type CloudflareResponse struct {
 	} `json:"result"`
 }
 
-func callAPI(provider, model, apiKey, prompt string) (string, error) {
+func callAPI(provider, model, apiKey string, messages []AIMessage) (string, error) {
 	var apiURL string
 	var req interface{}
 	headers := make(map[string]string)
@@ -71,8 +72,17 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 	switch provider {
 	case "Anthropic":
 		apiURL = "https://api.anthropic.com/v1/messages"
+
+		filteredMessages := make([]AIMessage, 0)
+		for _, msg := range messages {
+			if msg.Role != "system" {
+				filteredMessages = append(filteredMessages, msg)
+			}
+		}
+
 		req = AnthropicRequest{
-			Messages:    []AIMessage{{Role: "user", Content: prompt}},
+			System:      systemPrompt,
+			Messages:    filteredMessages,
 			Model:       model,
 			MaxTokens:   1000,
 			Temperature: 0.1,
@@ -95,7 +105,7 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 		apiURL = "https://api.openai.com/v1/chat/completions"
 		req = OpenAIRequest{
 			Model:       model,
-			Messages:    []AIMessage{{Role: "user", Content: prompt}},
+			Messages:    messages,
 			Temperature: 0.7,
 		}
 		headers["Authorization"] = "Bearer " + apiKey
@@ -115,7 +125,7 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 		apiURL = "http://localhost:11434/v1/chat/completions"
 		req = OpenAIRequest{
 			Model:       model,
-			Messages:    []AIMessage{{Role: "user", Content: prompt}},
+			Messages:    messages,
 			Temperature: 0.7,
 		}
 		headers["Authorization"] = "Bearer " + apiKey
@@ -141,7 +151,7 @@ func callAPI(provider, model, apiKey, prompt string) (string, error) {
 		}
 		apiURL = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/%s", accountID, model)
 		req = CloudflareRequest{
-			Messages:    []AIMessage{{Role: "user", Content: prompt}},
+			Messages:    messages,
 			MaxTokens:   500,
 			Temperature: 0.6,
 		}

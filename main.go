@@ -7,8 +7,11 @@ import (
 	"strings"
 )
 
+var cache map[string]string
+
 func main() {
 	loadConfig()
+	loadCache()
 
 	if len(os.Args) >= 2 && os.Args[1] == "config" {
 		configMenu()

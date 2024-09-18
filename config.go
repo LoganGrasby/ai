@@ -362,14 +362,9 @@ func (m configModel) View() string {
 }
 
 func loadConfig() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("Error getting user home directory: %v", err)
-	}
-
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath(home)
+	viper.AddConfigPath(homeDir)
 	viper.SetDefault("require_confirmation", true)
 
 	if err := viper.ReadInConfig(); err != nil {
