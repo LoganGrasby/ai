@@ -2,10 +2,12 @@
 
 This Go CLI tool allows you to translate natural language text commands into executable CLI commands. It supports multiple AI providers, including Cloudflare Workers AI LLMs, Anthropic, and OpenAI.
 
+Local LLMs are also supported with [Ollama](https://ollama.com/)
+
+
 ## Installation
 
-First ensure you have Go installed. Then run:
-
+First ensure you have [Go](https://go.dev/) installed. Then run:
 ```
 go install github.com/LoganGrasby/ai@latest
 ```
@@ -37,6 +39,25 @@ You can use the CLI tool in several ways:
    ai
    > Enter your command: List files in this directory
    ```
+
+Successful commands are cached. Errors are sent back to the model to retry:
+
+```
+% ai check my available system ram
+Generated command: free -m
+Executing command...
+Error executing command: sh: free: command not found
+Generated command: top -l 1 | grep PhysMem
+Executing command...
+PhysMem: 14G used (2169M wired, 607M compressor), 1192M unused.
+```
+The successful command is cached:
+```
+% ai check my available system ram
+Cached command: top -l 1 | grep PhysMem
+Executing command...
+PhysMem: 14G used (2149M wired, 607M compressor), 1187M unused.
+```
 
 ## Configuration
 
