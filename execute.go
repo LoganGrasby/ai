@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+type RequestType int
+
 func executeCommand(textCommand string) {
 	if cachedResponse, found := cache[textCommand]; found {
 		fmt.Println("Cached command:", cachedResponse)
@@ -42,7 +44,8 @@ func executeCommand(textCommand string) {
 	attempts := 0
 
 	for attempts < maxAttempts {
-		responseText, err = callAPI(provider, model, apiKey, messages)
+		responseText, err = callAPI[string](provider, model, apiKey, messages, LLMRequest)
+
 		if err != nil {
 			fmt.Printf("Error calling %s API: %v\n", provider, err)
 			os.Exit(1)
@@ -56,13 +59,6 @@ func executeCommand(textCommand string) {
 		}
 
 		fmt.Println("Generated command:", cmd.Content)
-
-		if viper.GetBool("require_confirmation") {
-			if !confirmExecution() {
-				fmt.Println("Command execution cancelled.")
-				return
-			}
-		}
 
 		err = executeCLICommand(cmd.Content)
 		if err == nil {

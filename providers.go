@@ -25,6 +25,7 @@ type AIMessage struct {
 type OpenAIRequest struct {
 	Model       string      `json:"model"`
 	Messages    []AIMessage `json:"messages"`
+	MaxTokens   int         `json:"max_tokens"`
 	Temperature float64     `json:"temperature,omitempty"`
 }
 
@@ -35,6 +36,11 @@ type OpenAIResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+}
+type OpenAIEmbeddingResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+	} `json:"data"`
 }
 
 type AnthropicRequest struct {
@@ -63,129 +69,197 @@ type CloudflareResponse struct {
 	} `json:"result"`
 }
 
-func callAPI(provider, model, apiKey string, messages []AIMessage) (string, error) {
-	var apiURL string
-	var req interface{}
-	headers := make(map[string]string)
-	var processResponse func([]byte) (string, error)
+type OllamaEmbeddingRequest struct {
+	Model string      `json:"model"`
+	Input interface{} `json:"input"`
+}
+
+type OllamaEmbeddingResponse struct {
+	Model           string      `json:"model"`
+	Embeddings      [][]float64 `json:"embeddings"`
+	TotalDuration   int64       `json:"total_duration"`
+	LoadDuration    int64       `json:"load_duration"`
+	PromptEvalCount int         `json:"prompt_eval_count"`
+}
+
+func callAPI[T any](provider, model, apiKey string, input interface{}, requestType RequestType) (T, error) {
+	var (
+		apiURL          string
+		req             interface{}
+		headers         = map[string]string{"Content-Type": "application/json"}
+		processResponse func([]byte) (T, error)
+	)
 
 	switch provider {
 	case "Anthropic":
 		apiURL = "https://api.anthropic.com/v1/messages"
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
 
-		filteredMessages := make([]AIMessage, 0)
-		for _, msg := range messages {
-			if msg.Role != "system" {
-				filteredMessages = append(filteredMessages, msg)
-			}
+		messages, ok := input.([]AIMessage)
+		if !ok {
+			var zero T
+			return zero, fmt.Errorf("Invalid input type for Anthropic")
 		}
+		filteredMessages := filterSystemMessages(messages)
 
 		req = AnthropicRequest{
 			System:      systemPrompt,
 			Messages:    filteredMessages,
 			Model:       model,
-			MaxTokens:   1000,
-			Temperature: 0.1,
+			MaxTokens:   maxTokens,
+			Temperature: temperature,
 		}
-		headers["x-api-key"] = apiKey
-		headers["Content-Type"] = "application/json"
-		headers["anthropic-version"] = "2023-06-01"
-		processResponse = func(body []byte) (string, error) {
+
+		processResponse = func(body []byte) (T, error) {
 			var apiResp AnthropicResponse
-			err := json.Unmarshal(body, &apiResp)
-			if err != nil {
-				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
+			if err := json.Unmarshal(body, &apiResp); err != nil {
+				var zero T
+				return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
 			}
-			if apiResp.Content[0].Text == "" {
-				return "", fmt.Errorf("Error: The LLM returned an empty response")
+			if len(apiResp.Content) == 0 || apiResp.Content[0].Text == "" {
+				var zero T
+				return zero, fmt.Errorf("The LLM returned an empty response")
 			}
-			return apiResp.Content[0].Text, nil
+			return any(apiResp.Content[0].Text).(T), nil
 		}
-	case "OpenAI":
-		apiURL = "https://api.openai.com/v1/chat/completions"
-		req = OpenAIRequest{
-			Model:       model,
-			Messages:    messages,
-			Temperature: 0.7,
+
+	case "OpenAI", "Ollama":
+		baseURL := map[string]string{
+			"OpenAI": "https://api.openai.com",
+			"Ollama": "http://localhost:11434",
+		}[provider]
+
+		if provider == "OpenAI" {
+			headers["Authorization"] = "Bearer " + apiKey
 		}
-		headers["Authorization"] = "Bearer " + apiKey
-		headers["Content-Type"] = "application/json"
-		processResponse = func(body []byte) (string, error) {
-			var apiResp OpenAIResponse
-			err := json.Unmarshal(body, &apiResp)
-			if err != nil {
-				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
+
+		switch requestType {
+		case LLMRequest:
+			apiURL = baseURL + "/v1/chat/completions"
+			messages, ok := input.([]AIMessage)
+			if !ok {
+				var zero T
+				return zero, fmt.Errorf("Invalid input type for LLM request")
 			}
-			if len(apiResp.Choices) == 0 {
-				return "", fmt.Errorf("No choices in the API response")
+			req = OpenAIRequest{
+				Model:       model,
+				Messages:    messages,
+				MaxTokens:   maxTokens,
+				Temperature: temperature,
 			}
-			return apiResp.Choices[0].Message.Content, nil
+			processResponse = processLLMResponse[T]
+
+		// case EmbeddingsRequest:
+		// 	apiURL = baseURL + "/v1/embeddings"
+		// 	req = OpenAIRequest{
+		// 		Model: model,
+		// 		Input: input,
+		// 	}
+		// 	processResponse = processEmbeddingResponse[T]
+
+		default:
+			var zero T
+			return zero, fmt.Errorf("Invalid request type for %s provider", provider)
 		}
-	case "Ollama":
-		apiURL = "http://localhost:11434/v1/chat/completions"
-		req = OpenAIRequest{
-			Model:       model,
-			Messages:    messages,
-			Temperature: 0.7,
-		}
-		headers["Authorization"] = "Bearer " + apiKey
-		headers["Content-Type"] = "application/json"
-		processResponse = func(body []byte) (string, error) {
-			var apiResp OpenAIResponse
-			err := json.Unmarshal(body, &apiResp)
-			if err != nil {
-				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
-			}
-			if len(apiResp.Choices) == 0 {
-				return "", fmt.Errorf("No choices in the API response")
-			}
-			return apiResp.Choices[0].Message.Content, nil
-		}
+
 	case "Cloudflare":
 		accountID := viper.GetString("cloudflare_account_id")
 		if accountID == "" {
 			accountID = os.Getenv("CLOUDFLARE_ACCOUNT_ID")
 		}
 		if accountID == "" {
-			return "", fmt.Errorf("Cloudflare Account ID not set. Use 'ai config' or set the CLOUDFLARE_ACCOUNT_ID environment variable")
+			var zero T
+			return zero, fmt.Errorf("Cloudflare Account ID not set. Use 'ai config' or set the CLOUDFLARE_ACCOUNT_ID environment variable")
 		}
 		apiURL = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/%s", accountID, model)
+		headers["Authorization"] = "Bearer " + apiKey
+
+		messages, ok := input.([]AIMessage)
+		if !ok {
+			var zero T
+			return zero, fmt.Errorf("Invalid input type for Cloudflare")
+		}
 		req = CloudflareRequest{
 			Messages:    messages,
-			MaxTokens:   500,
-			Temperature: 0.6,
+			MaxTokens:   maxTokens,
+			Temperature: temperature,
 		}
-		headers["Authorization"] = "Bearer " + apiKey
-		headers["Content-Type"] = "application/json"
-		processResponse = func(body []byte) (string, error) {
+
+		processResponse = func(body []byte) (T, error) {
 			var apiResp CloudflareResponse
-			err := json.Unmarshal(body, &apiResp)
-			if err != nil {
-				return "", fmt.Errorf("Error unmarshaling JSON: %v", err)
+			if err := json.Unmarshal(body, &apiResp); err != nil {
+				var zero T
+				return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
 			}
-			var response = apiResp.Result.Response
-			if response == "" {
-				return "", fmt.Errorf("No result in the API response")
+			if apiResp.Result.Response == "" {
+				var zero T
+				return zero, fmt.Errorf("No result in the API response")
 			}
-			return response, nil
+			return any(apiResp.Result.Response).(T), nil
 		}
+
 	default:
-		return "", fmt.Errorf("unsupported provider: %s", provider)
+		var zero T
+		return zero, fmt.Errorf("Unsupported provider: %s", provider)
 	}
 
 	return makeAPICall(apiURL, req, headers, processResponse)
 }
 
-func makeAPICall(apiURL string, req interface{}, headers map[string]string, processResponse func([]byte) (string, error)) (string, error) {
+func filterSystemMessages(messages []AIMessage) []AIMessage {
+	var filtered []AIMessage
+	for _, msg := range messages {
+		if msg.Role != "system" {
+			filtered = append(filtered, msg)
+		}
+	}
+	return filtered
+}
+
+func processLLMResponse[T any](body []byte) (T, error) {
+	var apiResp OpenAIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		var zero T
+		return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
+	}
+	if len(apiResp.Choices) == 0 {
+		var zero T
+		return zero, fmt.Errorf("No choices in the API response")
+	}
+	content := apiResp.Choices[0].Message.Content
+	return any(content).(T), nil
+}
+
+func processEmbeddingResponse[T any](body []byte) (T, error) {
+	var apiResp OpenAIEmbeddingResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		var zero T
+		return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
+	}
+	if len(apiResp.Data) == 0 {
+		var zero T
+		return zero, fmt.Errorf("No embeddings returned in the API response")
+	}
+	embeddings := make([][]float64, len(apiResp.Data))
+	for i, data := range apiResp.Data {
+		embeddings[i] = data.Embedding
+	}
+	return any(embeddings).(T), nil
+}
+
+func makeAPICall[T any](apiURL string, req interface{}, headers map[string]string, processResponse func([]byte) (T, error)) (T, error) {
 	reqBody, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("Error marshaling JSON: %v", err)
+		var zero T
+		return zero, fmt.Errorf("Error marshaling JSON: %v", err)
 	}
 
 	client := &http.Client{}
 	request, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
-		return "", fmt.Errorf("Error creating request: %v", err)
+		var zero T
+		return zero, fmt.Errorf("Error creating request: %v", err)
 	}
 
 	for key, value := range headers {
@@ -194,17 +268,20 @@ func makeAPICall(apiURL string, req interface{}, headers map[string]string, proc
 
 	resp, err := client.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("Error sending request: %v", err)
+		var zero T
+		return zero, fmt.Errorf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("Error reading response: %v", err)
+		var zero T
+		return zero, fmt.Errorf("Error reading response: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, body)
+		var zero T
+		return zero, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, body)
 	}
 
 	return processResponse(body)
