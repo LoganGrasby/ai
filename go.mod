@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.1.1
 	github.com/charmbracelet/lipgloss v0.13.0
 	github.com/spf13/viper v1.19.0
+	github.com/unum-cloud/usearch/golang v0.0.0-20240828190432-b9a9758a06e1
 )
 
 require (

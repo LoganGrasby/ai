@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -364,7 +363,7 @@ func (m configModel) View() string {
 func loadConfig() error {
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath(homeDir)
+	viper.AddConfigPath(storeDir)
 	viper.SetDefault("require_confirmation", true)
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -503,13 +502,7 @@ func maskAPIKey(key string) string {
 }
 
 func saveConfig() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("Error getting user home directory: %v", err)
-	}
-
-	configPath := filepath.Join(home, configFileName)
-	err = viper.WriteConfigAs(configPath)
+	err := viper.WriteConfigAs(configFile)
 	if err != nil {
 		return fmt.Errorf("Error saving config file: %v", err)
 	}

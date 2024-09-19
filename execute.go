@@ -14,12 +14,12 @@ import (
 type RequestType int
 
 func executeCommand(textCommand string) {
-	if cachedResponse, found := cache[textCommand]; found {
+	if cachedResponse, cachedKey, found := getCachedResponse(textCommand); found {
 		fmt.Println("Cached command:", cachedResponse)
 		err := executeCLICommand(cachedResponse)
 		if err != nil {
 			fmt.Println("Error executing cached command:", err)
-			delete(cache, textCommand)
+			removeFromCache(cachedKey)
 			saveCache()
 		}
 		return
@@ -63,6 +63,7 @@ func executeCommand(textCommand string) {
 		err = executeCLICommand(cmd.Content)
 		if err == nil {
 			cache[textCommand] = cmd.Content
+			addToVecDB(textCommand, cmd.Content)
 			saveCache()
 			break
 		} else {

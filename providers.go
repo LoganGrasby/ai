@@ -37,11 +37,6 @@ type OpenAIResponse struct {
 		} `json:"message"`
 	} `json:"choices"`
 }
-type OpenAIEmbeddingResponse struct {
-	Data []struct {
-		Embedding []float64 `json:"embedding"`
-	} `json:"data"`
-}
 
 type AnthropicRequest struct {
 	System      string      `json:"system"`
@@ -69,17 +64,23 @@ type CloudflareResponse struct {
 	} `json:"result"`
 }
 
-type OllamaEmbeddingRequest struct {
+type OpenAIEmbeddingRequest struct {
 	Model string      `json:"model"`
 	Input interface{} `json:"input"`
 }
 
-type OllamaEmbeddingResponse struct {
-	Model           string      `json:"model"`
-	Embeddings      [][]float64 `json:"embeddings"`
-	TotalDuration   int64       `json:"total_duration"`
-	LoadDuration    int64       `json:"load_duration"`
-	PromptEvalCount int         `json:"prompt_eval_count"`
+type OpenAIEmbeddingResponse struct {
+	Object string `json:"object"`
+	Data   []struct {
+		Object    string    `json:"object"`
+		Index     int       `json:"index"`
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+	Model string `json:"model"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 func callAPI[T any](provider, model, apiKey string, input interface{}, requestType RequestType) (T, error) {
@@ -150,13 +151,13 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 			}
 			processResponse = processLLMResponse[T]
 
-		// case EmbeddingsRequest:
-		// 	apiURL = baseURL + "/v1/embeddings"
-		// 	req = OpenAIRequest{
-		// 		Model: model,
-		// 		Input: input,
-		// 	}
-		// 	processResponse = processEmbeddingResponse[T]
+		case EmbeddingsRequest:
+			apiURL = baseURL + "/v1/embeddings"
+			req = OpenAIEmbeddingRequest{
+				Input: input.(string),
+				Model: model,
+			}
+			processResponse = processEmbeddingResponse[T]
 
 		default:
 			var zero T
@@ -232,20 +233,17 @@ func processLLMResponse[T any](body []byte) (T, error) {
 }
 
 func processEmbeddingResponse[T any](body []byte) (T, error) {
-	var apiResp OpenAIEmbeddingResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
+	var resp OpenAIEmbeddingResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
 		var zero T
-		return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
+		return zero, fmt.Errorf("Error unmarshaling embeddings response: %v", err)
 	}
-	if len(apiResp.Data) == 0 {
+	if len(resp.Data) == 0 {
 		var zero T
-		return zero, fmt.Errorf("No embeddings returned in the API response")
+		return zero, fmt.Errorf("No embeddings returned")
 	}
-	embeddings := make([][]float64, len(apiResp.Data))
-	for i, data := range apiResp.Data {
-		embeddings[i] = data.Embedding
-	}
-	return any(embeddings).(T), nil
+	embedding := resp.Data[0].Embedding
+	return any(embedding).(T), nil
 }
 
 func makeAPICall[T any](apiURL string, req interface{}, headers map[string]string, processResponse func([]byte) (T, error)) (T, error) {
