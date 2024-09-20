@@ -7,18 +7,32 @@ Local LLMs are also supported with [Ollama](https://ollama.com/)
 
 ## Installation
 
-First ensure you have [Go](https://go.dev/) installed. Then run:
-```
-go install github.com/LoganGrasby/ai@latest
-```
+First ensure you have [Go](https://go.dev/) installed.
 
-Ensure your PATH environment variable is configured correctly:
-
+Ensure your PATH and GOPATH are set correctly in your shell profile (e.g. `~/.bashrc`, `~/.zshrc`, etc.):
 ```
 export PATH=$PATH:/usr/local/go/bin
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
+
+export CGO_CFLAGS="-I/usr/local/include"
+export CGO_LDFLAGS="-L/usr/local/lib"
+export DYLD_LIBRARY_PATH=/usr/local/lib:$DYLD_LIBRARY_PATH
 ```
+
+Install:
+```
+git clone https://github.com/LoganGrasby/ai
+cd ai
+make install
+```
+
+This will:
+1. Install [Usearch](https://github.com/unum-cloud/usearch)
+2. Install the `ai` CLI tool to your `$GOPATH/bin` directory.
+
+If you have issues installing usearch see the installation instructions [here](https://github.com/unum-cloud/usearch/blob/main/golang/README.md)
+
 
 ## Usage
 
@@ -39,6 +53,8 @@ You can use the CLI tool in several ways:
    ai
    > Enter your command: List files in this directory
    ```
+
+## Semantic Cache
 
 Successful commands are cached. Errors are sent back to the model to retry:
 

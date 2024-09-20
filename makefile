@@ -33,12 +33,12 @@ endif
 install_usearch:
 ifeq ($(OS),Linux)
 	@echo "Installing USearch on Linux..."
-	wget $(USEARCH_URL) -O $(USEARCH_PACKAGE)
+	wget -q $(USEARCH_URL) -O $(USEARCH_PACKAGE)
 	sudo dpkg -i $(USEARCH_PACKAGE)
 	rm $(USEARCH_PACKAGE)
 else ifeq ($(OS),Darwin)
 	@echo "Installing USearch on macOS..."
-	wget $(USEARCH_URL) -O $(USEARCH_PACKAGE)
+	wget -q $(USEARCH_URL) -O $(USEARCH_PACKAGE)
 	unzip $(USEARCH_PACKAGE)
 	sudo mv build_release/libusearch_c.dylib /usr/local/lib/
 	sudo mv c/usearch.h /usr/local/include/
@@ -53,13 +53,13 @@ build: install_usearch
 	@echo "Building ai..."
 	go build -tags "$(GO_BUILD_TAGS)" -o ${BINARY} .
 
-install:
-	@echo "Installing ai..."
-	go install
-
 clean:
 	@echo "Cleaning up..."
 	go clean
 	rm -f ${BINARY}
 
 .PHONY: build install_usearch install clean
+
+install: install_usearch build
+	@echo "Installing ai..."
+	go install
