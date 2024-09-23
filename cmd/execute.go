@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bytes"
@@ -13,14 +13,19 @@ import (
 
 type RequestType int
 
+const (
+	maxRetries             = 3
+	LLMRequest RequestType = iota
+	EmbeddingsRequest
+)
+
 func executeCommand(textCommand string) {
-	if cachedResponse, cachedKey, found := getCachedResponse(textCommand); found {
+	cachedResponse, found, vector := getCachedResponse(textCommand)
+	if found {
 		fmt.Println("Cached command:", cachedResponse)
 		err := executeCLICommand(cachedResponse)
 		if err != nil {
 			fmt.Println("Error executing cached command:", err)
-			removeFromCache(cachedKey)
-			saveCache()
 		}
 		return
 	}
@@ -38,13 +43,11 @@ func executeCommand(textCommand string) {
 		{Role: "user", Content: textCommand},
 	}
 
-	var responseText string
-	var err error
 	maxAttempts := maxRetries
 	attempts := 0
 
 	for attempts < maxAttempts {
-		responseText, err = callAPI[string](provider, model, apiKey, messages, LLMRequest)
+		responseText, err := callAPI[string](provider, model, apiKey, messages, LLMRequest)
 
 		if err != nil {
 			fmt.Printf("Error calling %s API: %v\n", provider, err)
@@ -62,9 +65,7 @@ func executeCommand(textCommand string) {
 
 		err = executeCLICommand(cmd.Content)
 		if err == nil {
-			cache[textCommand] = cmd.Content
-			addToVecDB(textCommand, cmd.Content)
-			saveCache()
+			addToVecDB(vector, textCommand, cmd.Content)
 			break
 		} else {
 			errorMessage := err.Error()
@@ -77,10 +78,18 @@ func executeCommand(textCommand string) {
 			attempts++
 		}
 	}
+}
 
-	if attempts == maxAttempts {
-		fmt.Println("Maximum attempts reached. Unable to execute the command successfully.")
+func confirmExecution() bool {
+	requireConfirmation := viper.GetBool("require_confirmation")
+	if !requireConfirmation {
+		return true
 	}
+
+	fmt.Print("Do you want to execute this command? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	return strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
 }
 
 func executeCLICommand(command string) error {

@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bytes"
@@ -130,11 +130,9 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 			"OpenAI": "https://api.openai.com",
 			"Ollama": "http://localhost:11434",
 		}[provider]
-
 		if provider == "OpenAI" {
 			headers["Authorization"] = "Bearer " + apiKey
 		}
-
 		switch requestType {
 		case LLMRequest:
 			apiURL = baseURL + "/v1/chat/completions"
@@ -150,7 +148,6 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 				Temperature: temperature,
 			}
 			processResponse = processLLMResponse[T]
-
 		case EmbeddingsRequest:
 			apiURL = baseURL + "/v1/embeddings"
 			req = OpenAIEmbeddingRequest{
@@ -158,12 +155,10 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 				Model: model,
 			}
 			processResponse = processEmbeddingResponse[T]
-
 		default:
 			var zero T
 			return zero, fmt.Errorf("Invalid request type for %s provider", provider)
 		}
-
 	case "Cloudflare":
 		accountID := viper.GetString("cloudflare_account_id")
 		if accountID == "" {
@@ -175,7 +170,6 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 		}
 		apiURL = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/run/%s", accountID, model)
 		headers["Authorization"] = "Bearer " + apiKey
-
 		messages, ok := input.([]AIMessage)
 		if !ok {
 			var zero T
@@ -186,7 +180,6 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 			MaxTokens:   maxTokens,
 			Temperature: temperature,
 		}
-
 		processResponse = func(body []byte) (T, error) {
 			var apiResp CloudflareResponse
 			if err := json.Unmarshal(body, &apiResp); err != nil {

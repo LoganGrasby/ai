@@ -28,8 +28,9 @@ make install
 ```
 
 This will:
-1. Install [Usearch](https://github.com/unum-cloud/usearch)
-2. Install the `ai` CLI tool to your `$GOPATH/bin` directory.
+1. Add the necessary environment variables to your shell profile (if they don't already exist)
+2. Install [Usearch](https://github.com/unum-cloud/usearch)
+3. Install the `ai` CLI tool to your `$GOPATH/bin` directory.
 
 If you have issues installing usearch see the installation instructions [here](https://github.com/unum-cloud/usearch/blob/main/golang/README.md)
 
