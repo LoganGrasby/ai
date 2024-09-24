@@ -4,18 +4,18 @@ import (
 	"bufio"
 	"fmt"
 	"go/build"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/charmbracelet/log"
+	badger "github.com/dgraph-io/badger/v4"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	usearch "github.com/unum-cloud/usearch/golang"
-
-	badger "github.com/dgraph-io/badger/v4"
 )
 
 const (
@@ -36,7 +36,31 @@ var (
 	vectorSize           int
 )
 
-var systemPrompt = fmt.Sprintf("Translate the following text command to a CLI command for %s. The current working directory is %s. Output the command within XML tags like this: <command>CLI command</command>", osInfo, currentDir)
+var systemPrompt = fmt.Sprintf(`
+You are an AI CLI assistant that explains your reasoning step by step, incorporating dynamic Chain of Thought (CoT), reflection, and verbal reinforcement learning.
+You specialize in solving coding problems. You have direct access to the computers terminal and can execute commands.
+Follow these instructions:
+
+1. Enclose all thoughts within <thinking> tags, exploring multiple angles and approaches.
+2. Output the command within XML tags like this: <command>CLI command</command> when you want to see the result of the command.
+3. If you don't need to review the results of the command to solve the problem output <final_command>CLI command</final_command> instead.
+4. Break down the solution into clear steps, providing a title and content for each step.
+5. After each step, decide if you need another step or if you're ready to give the final answer.
+6. Continuously adjust your reasoning based on intermediate results and reflections, adapting your strategy as you progress.
+7. Regularly evaluate your progress, being critical and honest about your reasoning process.
+8. Assign a quality score between 0.0 and 1.0 to guide your approach:
+   - 0.8+: Continue current approach
+   - 0.5-0.7: Consider minor adjustments
+   - Below 0.5: Seriously consider backtracking and trying a different approach
+9. If unsure or if your score is low, backtrack and try a different approach, explaining your decision.
+10. Explore multiple solutions individually if possible, comparing approaches in your reflections.
+11. Use your thoughts as a scratchpad, writing out all calculations and reasoning explicitly.
+12. Review whether syntax errors exist
+
+Here is the problem statement:
+Translate the following text command to a CLI command for %s.
+The current working directory is %s.
+`, osInfo, currentDir)
 
 var cfgFile string
 
@@ -127,12 +151,13 @@ func initConfig() {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(storeDir)
 
-	viper.SetDefault("require_confirmation", true)
+	viper.SetDefault("require_confirmation", false)
 	viper.SetDefault("k", 5)
 	viper.SetDefault("max_distance", 0.5)
 	viper.SetDefault("vector_size", 1536)
 	viper.SetDefault("max_tokens", 1000)
 	viper.SetDefault("temperature", 0.1)
+	viper.SetDefault("stream", true)
 
 	viper.AutomaticEnv()
 
@@ -157,13 +182,13 @@ func initConfig() {
 }
 
 func execute(args []string) {
-
+	log.SetLevel(map[bool]log.Level{true: log.DebugLevel, false: log.InfoLevel}[false])
 	var fullCommand string
 
 	if len(args) > 0 {
 		fullCommand = strings.Join(args, " ")
 	} else {
-		fmt.Print("Enter your command: ")
+		fmt.Print(termenv.String("Enter your command: ").Bold())
 		reader := bufio.NewReader(os.Stdin)
 		cmdInput, err := reader.ReadString('\n')
 		if err != nil {
@@ -172,7 +197,6 @@ func execute(args []string) {
 		}
 		fullCommand = strings.TrimSpace(cmdInput)
 	}
-
 	executeCommand(fullCommand)
 	defer db.Close()
 	defer index.Destroy()

@@ -3,7 +3,7 @@ BINARY=ai
 OS=$(shell uname -s)
 ARCH=$(shell uname -m)
 
-USEARCH_VERSION=2.15.1
+USEARCH_VERSION=2.15.3
 
 SHELL := /bin/bash
 
@@ -126,4 +126,8 @@ install: update_profile install_usearch build go_install
 	@rm -f .profile_status
 	@echo "ai installed successfully!"
 
-.PHONY: build install_usearch install clean notify_install
+rebuild:
+	go build -tags "$(GO_BUILD_TAGS)" -o ${BINARY} .
+	go install
+
+.PHONY: build install_usearch install clean notify_install rebuild

@@ -8,7 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/log"
 	"github.com/spf13/viper"
 )
 
@@ -36,20 +40,6 @@ type OpenAIResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
-}
-
-type AnthropicRequest struct {
-	System      string      `json:"system"`
-	Messages    []AIMessage `json:"messages"`
-	Model       string      `json:"model"`
-	MaxTokens   int         `json:"max_tokens"`
-	Temperature float64     `json:"temperature,omitempty"`
-}
-
-type AnthropicResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
 }
 
 type CloudflareRequest struct {
@@ -83,49 +73,124 @@ type OpenAIEmbeddingResponse struct {
 	} `json:"usage"`
 }
 
+var spinnerProgram *tea.Program
+var spinnerRunning bool
+var contentBuffer strings.Builder
+
+func processStream(content string) {
+	for _, char := range content {
+		contentBuffer.WriteRune(char)
+
+		if strings.HasSuffix(contentBuffer.String(), "<thinking>") {
+			if !spinnerRunning {
+				spinnerRunning = true
+				spinnerProgram = tea.NewProgram(functionModel("Thinking...", func() error {
+					for spinnerRunning {
+						time.Sleep(100 * time.Millisecond)
+					}
+					return nil
+				}))
+				go func() {
+					if _, err := spinnerProgram.Run(); err != nil {
+						fmt.Printf("Error running spinner: %v\n", err)
+					}
+				}()
+			}
+		} else if strings.HasSuffix(contentBuffer.String(), "</thinking>") {
+			if spinnerRunning {
+				spinnerRunning = false
+				spinnerProgram.Quit()
+			}
+		}
+
+		if !spinnerRunning {
+			fmt.Print(string(char))
+		}
+	}
+}
+
+func cleanup() {
+	if spinnerRunning {
+		spinnerRunning = false
+		spinnerProgram.Quit()
+	}
+}
+
 func callAPI[T any](provider, model, apiKey string, input interface{}, requestType RequestType) (T, error) {
 	var (
 		apiURL          string
 		req             interface{}
 		headers         = map[string]string{"Content-Type": "application/json"}
 		processResponse func([]byte) (T, error)
+		stream          = viper.GetBool("stream")
 	)
 
 	switch provider {
 	case "Anthropic":
-		apiURL = "https://api.anthropic.com/v1/messages"
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
-
 		messages, ok := input.([]AIMessage)
 		if !ok {
 			var zero T
 			return zero, fmt.Errorf("Invalid input type for Anthropic")
 		}
 		filteredMessages := filterSystemMessages(messages)
-
-		req = AnthropicRequest{
-			System:      systemPrompt,
-			Messages:    filteredMessages,
-			Model:       model,
-			MaxTokens:   maxTokens,
-			Temperature: temperature,
-		}
-
-		processResponse = func(body []byte) (T, error) {
-			var apiResp AnthropicResponse
-			if err := json.Unmarshal(body, &apiResp); err != nil {
-				var zero T
-				return zero, fmt.Errorf("Error unmarshaling JSON: %v", err)
+		if stream {
+			result, err := anthropicStream(filteredMessages, model, maxTokens, processStream)
+			if err != nil {
+				return *new(T), fmt.Errorf("streaming error: %w", err)
 			}
-			if len(apiResp.Content) == 0 || apiResp.Content[0].Text == "" {
+			return any(result).(T), nil
+		} else {
+			result, err := anthropicCompletion(filteredMessages, model, maxTokens)
+			if err != nil {
 				var zero T
-				return zero, fmt.Errorf("The LLM returned an empty response")
+				return zero, err
 			}
-			return any(apiResp.Content[0].Text).(T), nil
+			return any(result).(T), nil
 		}
+	case "OpenAI":
+		baseURL := map[string]string{
+			"OpenAI": "https://api.openai.com",
+			"Ollama": "http://localhost:11434",
+		}[provider]
+		if provider == "OpenAI" {
+			headers["Authorization"] = "Bearer " + apiKey
+		}
+		switch requestType {
+		case LLMRequest:
+			messages, ok := input.([]AIMessage)
+			if !ok {
+				var zero T
+				return zero, fmt.Errorf("Invalid input type for OpenAI")
+			}
+			if stream {
+				result, err := openaiStream(messages, model, maxTokens, processStream)
+				if err != nil {
+					cleanup()
+					return *new(T), fmt.Errorf("streaming error: %w", err)
+				}
 
-	case "OpenAI", "Ollama":
+				cleanup()
+				return any(result).(T), nil
+			} else {
+				result, err := openaiCompletion(messages, model, maxTokens)
+				if err != nil {
+					var zero T
+					return zero, err
+				}
+				return any(result).(T), nil
+			}
+		case EmbeddingsRequest:
+			apiURL = baseURL + "/v1/embeddings"
+			req = OpenAIEmbeddingRequest{
+				Input: input.(string),
+				Model: model,
+			}
+			processResponse = processEmbeddingResponse[T]
+		default:
+			var zero T
+			return zero, fmt.Errorf("Invalid request type for %s provider", provider)
+		}
+	case "Ollama":
 		baseURL := map[string]string{
 			"OpenAI": "https://api.openai.com",
 			"Ollama": "http://localhost:11434",
@@ -192,12 +257,10 @@ func callAPI[T any](provider, model, apiKey string, input interface{}, requestTy
 			}
 			return any(apiResp.Result.Response).(T), nil
 		}
-
 	default:
 		var zero T
 		return zero, fmt.Errorf("Unsupported provider: %s", provider)
 	}
-
 	return makeAPICall(apiURL, req, headers, processResponse)
 }
 
@@ -243,6 +306,7 @@ func makeAPICall[T any](apiURL string, req interface{}, headers map[string]strin
 	reqBody, err := json.Marshal(req)
 	if err != nil {
 		var zero T
+		log.Debug("Error marshaling JSON", "error", err)
 		return zero, fmt.Errorf("Error marshaling JSON: %v", err)
 	}
 
@@ -250,6 +314,7 @@ func makeAPICall[T any](apiURL string, req interface{}, headers map[string]strin
 	request, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
 		var zero T
+		log.Debug("Error creating request", "error", err)
 		return zero, fmt.Errorf("Error creating request: %v", err)
 	}
 
@@ -260,6 +325,7 @@ func makeAPICall[T any](apiURL string, req interface{}, headers map[string]strin
 	resp, err := client.Do(request)
 	if err != nil {
 		var zero T
+		log.Debug("Error sending request", "error", err)
 		return zero, fmt.Errorf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -267,13 +333,20 @@ func makeAPICall[T any](apiURL string, req interface{}, headers map[string]strin
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		var zero T
+		log.Debug("Error reading response", "error", err)
 		return zero, fmt.Errorf("Error reading response: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		var zero T
+		log.Debug("API request failed", "statusCode", resp.StatusCode, "body", string(body))
 		return zero, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, body)
 	}
-
-	return processResponse(body)
+	result, err := processResponse(body)
+	if err != nil {
+		log.Debug("Error processing response", "error", err)
+	} else {
+		log.Debug("Response processed successfully")
+	}
+	return result, err
 }

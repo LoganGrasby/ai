@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"os"
 
+	"github.com/charmbracelet/log"
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/spf13/viper"
 	usearch "github.com/unum-cloud/usearch/golang"
@@ -111,30 +112,50 @@ func getFromDB(key []byte) (string, error) {
 
 func getCachedResponse(textCommand string) (string, bool, []float32) {
 	if index == nil {
+		log.Debug("Vector index is unavailable")
 		panic("Vector index is unavailable")
 	}
+
 	vector := computeVector(textCommand)
+	log.Debug("Computed vector for text command", "command", textCommand)
+
 	keys, distances, err := index.Search(vector, uint(k))
 	if err != nil {
+		log.Debug("Failed to search Index", "error", err)
 		panic(fmt.Sprintf("Failed to search Index: %v", err))
 	}
+
+	log.Debug("Search results", "keys_count", len(keys), "distances_count", len(distances))
+
 	if len(keys) == 0 {
+		log.Debug("No keys found in search")
 		return "", false, vector
 	}
+
 	key := keys[0]
 	distance := distances[0]
+	log.Debug("Closest match", "key", key, "distance", distance)
+
 	maxDistance := viper.GetFloat64("max_distance")
 	if maxDistance == 0 {
 		maxDistance = defaultMaxDistance
+		log.Debug("Using default max distance", "max_distance", maxDistance)
+	} else {
+		log.Debug("Using configured max distance", "max_distance", maxDistance)
 	}
+
 	if float64(distance) > maxDistance {
+		log.Debug("Distance exceeds max distance", "distance", distance, "max_distance", maxDistance)
 		return "", false, vector
 	}
+
 	value, err := getFromDB(uint64ToBytes(key))
 	if err != nil {
-		fmt.Println("Failed to retrieve value from DB:", err)
+		log.Debug("Failed to retrieve value from DB", "error", err)
 		return "", false, vector
 	}
+
+	log.Debug("Successfully retrieved cached response", "key", key, "value_length", len(value))
 	return value, true, vector
 }
 
